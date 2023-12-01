@@ -27,13 +27,45 @@ static struct task_struct* task = NULL;
 static int test_case;
 static struct hrtimer no_restart_hr_timer;
 
-module_param(pid, int, 0);
+module_param(pid, int, 0444);
 
 // Initialize memory statistics variables
 unsigned long total_rss = 0;
 unsigned long total_swap = 0;
 unsigned long total_wss = 0;
 
+
+int ptep_test_and_clear_young (struct vm_area_struct *vma, unsigned
+long addr, pte_t *ptep);
+/* Test and clear the accessed bit of a given pte entry. vma is the pointer
+to the memory region, addr is the address of the page, and ptep is a pointer
+to a pte. It returns 1 if the pte was accessed, or 0 if not accessed. */
+/* The ptep_test_and_clear_young() is architecture dependent and is not
+exported to be used in a kernel module. You will need to add its
+implementation as follows to your kernel module. */
+int ptep_test_and_clear_young(struct vm_area_struct *vma,
+unsigned long addr, pte_t *ptep)
+{
+	int ret = 0;
+	if (pte_young(*ptep)){
+		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED, (unsigned long *) &ptep->pte);
+	}
+	return ret;
+}
+
+
+struct task_struct* get_task_struct_by_pid(int p)
+{
+	// loop iterator
+	for_each_process(task)
+	{
+		// if required task struct is found
+		if(task->p == p)
+			return task;
+	}
+
+	return NULL;
+}
 
 
 
@@ -44,7 +76,8 @@ static void parse_vma(void)
     struct mm_struct *mm = NULL;
 
     if(pid > 0){
-        task = pid_task(find_vpid(pid), PIDTYPE_PID);
+ //       task = pid_task(find_vpid(pid), PIDTYPE_PID);
+        task = get_task_struct_by_pid(pid);
         if(task && task->mm){
             mm = task->mm;
             // TODO 2: mm_struct to initialize the VMA_ITERATOR (-- Assignment 4)
@@ -111,15 +144,15 @@ static void parse_vma(void)
                     // TODO 8: use pte_young(pte) to check if the page is actively used
                     // if it is actively used, update wss and clear the accessed bit by: "test_and_clear_bit(_PAGE_BIT_ACCESSED,(unsigned long *)ppte);"
          
-		            if (pte_present(pte)) {
-		            	total_rss++;
-		                if (ptep_test_and_clear_young(vma,vpage,ptep)) {
-		                    total_wss++;
-		                }
+		    if (pte_present(pte)) {
+		       	total_rss++;
+		        if (ptep_test_and_clear_young(vma,vpage,ptep)) {
+		           total_wss++;
+		         }
 		                
-		            } else {
-		                total_swap++;
-		            }
+		    } else {
+		         total_swap++;
+		    }
                    
                 }
             } 
@@ -134,7 +167,7 @@ enum hrtimer_restart timer_callback( struct hrtimer *timer_for_restart )
 {
     ktime_t currtime , interval;
     currtime  = ktime_get();
-    interval = ktime_set(0,timer_interval_ns);
+    interval = ktime_set(timer_interval_ns, 0);
     hrtimer_forward(timer_for_restart, currtime , interval);
     total_rss = 0;
     total_swap = 0;
